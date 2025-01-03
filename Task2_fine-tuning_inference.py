@@ -129,7 +129,7 @@ eval_results = trainer.evaluate()
 print("Evaluation Results:", eval_results)
 
 # Prepare test data (if available)
-test_data = pd.read_csv('val_task2_data.tsv', sep='\t')  # Replace with your actual test dataset
+test_data = pd.read_csv('val_task2_data.tsv', sep='\t')
 test_encodings = tokenizer(list(test_data['text']), truncation=True, padding=True, max_length=512)
 
 test_dataset = ParliamentDataset(test_encodings, list(test_data['label']))
@@ -142,18 +142,17 @@ predicted_labels = np.argmax(predictions.predictions, axis=1)
 test_data['predicted_label'] = predicted_labels
 test_data.to_csv('test_predictions2.tsv', sep='\t', index=False)
 
-# Load the trained model predictions (assuming the file is 'trained_model_predictions.csv')
 #file_path = 'c:/Users/yhyal/OneDrive/Masaüstü/nlp2/try/test_predictions2.csv'
 trained_model_df = data
 
-true_labels = trained_model_df['label']  # Replace with the actual column name for true labels
+true_labels = trained_model_df['label']
 
 # Extract predictions from your trained model
-trained_model_predictions = trained_model_df['predicted_label'].tolist()  # Replace this column name if necessary
+trained_model_predictions = trained_model_df['predicted_label'].tolist()
 
 # Create a comparison DataFrame
 comparison_df = pd.DataFrame({
-    'text': trained_model_df['text'],  # Replace with your actual text column name
+    'text': trained_model_df['text'],
     'true_labels': true_labels,
     'trained_model_prediction': trained_model_predictions
 })
@@ -161,7 +160,6 @@ comparison_df = pd.DataFrame({
 # Print the first few rows of the comparison DataFrame
 print(comparison_df.head())
 
-# Calculate accuracy for both models (assuming labels are numeric or categorical)
 accuracy_trained_model = accuracy_score(comparison_df['true_labels'], comparison_df['trained_model_prediction'])
 
 print(f"Accuracy of trained model: {accuracy_trained_model:.4f}")
@@ -254,9 +252,7 @@ with open("task2_clm_predictions.json", "r") as f:
 # Post-process the GPT-2 predictions to binary labels
 gpt2_predictions_mapped = [map_to_class(response) for response in gpt2_predictions]
 
-# Assuming you have the true labels in 'val_data', replace with your actual column name
-# Here we assume you have a DataFrame or some source for true labels
-true_labels = val_data['label']  # Replace this with your actual labels column name
+true_labels = val_data['label']
 
 # Calculate the accuracy of GPT-2 model
 accuracy_gpt2 = accuracy_score(true_labels, gpt2_predictions_mapped)
@@ -353,9 +349,7 @@ with open("task2_clm_predictions.json", "r") as f:
 # Post-process the GPT-2 predictions to binary labels
 gpt2_predictions_mapped = [map_to_class(response) for response in gpt2_predictions]
 
-# Assuming you have the true labels in 'val_data', replace with your actual column name
-# Here we assume you have a DataFrame or some source for true labels
-true_labels = val_data['label']  # Replace this with your actual labels column name
+true_labels = val_data['label']
 
 # Calculate the accuracy of GPT-2 model
 accuracy_gpt2 = accuracy_score(true_labels, gpt2_predictions_mapped)
