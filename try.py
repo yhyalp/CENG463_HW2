@@ -1,4 +1,5 @@
 from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score
 import pandas as pd
 import numpy as np
 from collections import Counter
@@ -10,6 +11,7 @@ import os
 from transformers import AutoTokenizer, AutoModelForCausalLM
 import json
 from accelerate import init_empty_weights, dispatch_model
+import json
 
 print(os.getcwd(), "sssssssssssssssssssssssssssssssssssssssss")
 print(torch.cuda.is_available())
@@ -96,9 +98,9 @@ trainer = Trainer(
     train_dataset=train_dataset,
     eval_dataset=val_dataset
 )
-#trainer.train(resume_from_checkpoint=True)
-#trainer.train()
-"""
+trainer.train(resume_from_checkpoint=True)
+trainer.train()
+
 # Evaluate the model on the validation set
 eval_results = trainer.evaluate()
 print("Evaluation Results:", eval_results)
@@ -116,54 +118,210 @@ predicted_labels = np.argmax(predictions.predictions, axis=1)
 # Save predictions
 test_data['predicted_label'] = predicted_labels
 test_data.to_csv('test_predictions.tsv', sep='\t', index=False)
-"""
-# Load CLM
-access_token = "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"
-model_name = "openlm-research/open_llama_3b"  # Replace with the actual model name
 
-# Load tokenizer with use_auth_token
-tokenizer = AutoTokenizer.from_pretrained(
-    "openlm-research/open_llama_3b",
-    token=access_token,
-    legacy=False  # Use new tokenizer behavior
-)
+# Load the trained model predictions (assuming the file is 'trained_model_predictions.csv')
+#file_path = 'c:/Users/yhyal/OneDrive/Masaüstü/nlp2/try/test_predictions.csv'
+trained_model_df = data
 
-# Set the pad_token to be the same as the eos_token (if eos_token exists)
+true_labels = trained_model_df['label']  # Replace with the actual column name for true labels
+
+# Extract predictions from your trained model
+trained_model_predictions = trained_model_df['predicted_label'].tolist()  # Replace this column name if necessary
+
+# Create a comparison DataFrame
+comparison_df = pd.DataFrame({
+    'text': trained_model_df['text_en'],  # Replace with your actual text column name
+    'true_labels': true_labels,
+    'trained_model_prediction': trained_model_predictions
+})
+
+# Print the first few rows of the comparison DataFrame
+print(comparison_df.head())
+
+# Calculate accuracy for both models (assuming labels are numeric or categorical)
+accuracy_trained_model = accuracy_score(comparison_df['true_labels'], comparison_df['trained_model_prediction'])
+
+print(f"Accuracy of trained model: {accuracy_trained_model:.4f}")
+
+# Load GPT-2 model and tokenizer
+model_name = "gpt2"  # Using the Hugging Face GPT-2 model
+tokenizer = AutoTokenizer.from_pretrained(model_name)
+
+# Set the pad_token to be the same as the eos_token (GPT-2 does not have a pad_token by default)
 if tokenizer.eos_token:
     tokenizer.pad_token = tokenizer.eos_token
 else:
-    # Optionally, define a custom pad_token if eos_token does not exist
     tokenizer.add_special_tokens({'pad_token': '[PAD]'})
-# Load model with use_auth_token
+
+# Set environment variable to prevent memory fragmentation
+import os
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:128"
+
+# Load the GPT-2 model
 clm_model = AutoModelForCausalLM.from_pretrained(
     model_name,
-    token=access_token,
-    torch_dtype=torch.float16,  # Use mixed precision
+    torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,  # Mixed precision for GPU
     device_map="auto"  # Automatically map model layers across devices
 )
+
+# Determine device
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 clm_model.to(device)
-clm_model.gradient_checkpointing_enable()
+
 # Prepare prompts for Task 1
 task1_prompts = [
     f"Determine whether the speaker's party is left-leaning or right-leaning based on the following parliamentary speech: {text}"
     for text in val_data['text_en']
 ]
 
-# Tokenize inputs with padding and truncation
-inputs = tokenizer(task1_prompts, return_tensors="pt", padding=True, truncation=True)
-inputs = {k: v.to("cuda") for k, v in inputs.items()}  # Move inputs to GPU if needed
+decoded_responses = []
+max_input_length = 1024 - 20  # Reserve space for generated tokens
 
-# Add attention mask to ensure proper behavior
-input_ids = inputs["input_ids"]
-attention_mask = inputs["attention_mask"]
+# Function to map GPT-2 response to binary labels (0 or 1)
+def map_to_class(response):
+    # Look for keywords in the response and map accordingly
+    if "left" in response.lower():
+        return 0
+    elif "right" in response.lower():
+        return 1
+    return -1  # Return -1 for unclear cases (though you might want to handle this differently)
 
-# Generate outputs
-outputs = clm_model.generate(inputs["input_ids"], attention_mask=inputs["attention_mask"], max_new_tokens=20)
+# Generate responses and post-process for comparison
+for prompt in task1_prompts:
+    # Tokenize with truncation
+    inputs = tokenizer(
+        prompt, 
+        return_tensors="pt", 
+        padding="longest", 
+        truncation=True, 
+        max_length=max_input_length
+    )
+    inputs = {k: v.to(device) for k, v in inputs.items()}  # Move inputs to GPU
 
-# Decode responses
-decoded_responses = [tokenizer.decode(output, skip_special_tokens=True) for output in outputs]
+    # Generate outputs
+    outputs = clm_model.generate(
+        inputs["input_ids"],
+        attention_mask=inputs.get("attention_mask"),
+        max_new_tokens=20  # Adjust to fit within model limits
+    )
 
-# Print inputs and outputs
-for text, response in zip(task1_prompts[:2], decoded_responses):  # Matching the reduced batch size
-    print(f"Input: {text}\nOutput: {response}\n")
+    # Decode response
+    decoded_response = tokenizer.decode(outputs[0], skip_special_tokens=True)
+    decoded_responses.append(decoded_response)
+
+    # Print input and output
+    print(f"Input: {prompt}\nOutput: {decoded_response}\n")
+
+# Save the GPT-2 predictions to a JSON file
+with open("task1_clm_predictions.json", "w") as f:
+    json.dump(decoded_responses, f)
+
+# Function to map GPT-2 response to binary labels (0 or 1)
+def map_to_class(response):
+    # Look for keywords in the response and map accordingly
+    if "left" in response.lower():
+        return 0
+    elif "right" in response.lower():
+        return 1
+    return -1  # Return -1 for unclear cases (though you might want to handle this differently)
+# Load the GPT-2 predictions from the saved JSON file
+with open("task1_clm_predictions.json", "r") as f:
+    gpt2_predictions = json.load(f)
+
+# Post-process the GPT-2 predictions to binary labels
+gpt2_predictions_mapped = [map_to_class(response) for response in gpt2_predictions]
+
+# Assuming you have the true labels in 'val_data', replace with your actual column name
+# Here we assume you have a DataFrame or some source for true labels
+true_labels = val_data['label']  # Replace this with your actual labels column name
+
+# Calculate the accuracy of GPT-2 model
+accuracy_gpt2 = accuracy_score(true_labels, gpt2_predictions_mapped)
+
+# Print the accuracy
+print(f"Accuracy of GPT-2 model: {accuracy_gpt2}")
+
+# Load GPT-2 model and tokenizer
+model_name = "ytu-ce-cosmos/turkish-gpt2-large"  # Using the Hugging Face GPT-2 model
+tokenizer = AutoTokenizer.from_pretrained(model_name)
+
+# Set the pad_token to be the same as the eos_token (GPT-2 does not have a pad_token by default)
+if tokenizer.eos_token:
+    tokenizer.pad_token = tokenizer.eos_token
+else:
+    tokenizer.add_special_tokens({'pad_token': '[PAD]'})
+
+# Set environment variable to prevent memory fragmentation
+import os
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:128"
+
+# Load the GPT-2 model
+clm_model = AutoModelForCausalLM.from_pretrained(
+    model_name,
+    torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,  # Mixed precision for GPU
+    device_map="auto"  # Automatically map model layers across devices
+)
+
+# Determine device
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+clm_model.to(device)
+
+# Prepare prompts for Task 1
+task1_prompts_turkish = [
+    f"Aşağıdaki meclis konuşmasına dayanarak, konuşmacının partisinin sol eğilimli mi yoksa sağ eğilimli mi olduğunu belirleyin: {text}"
+    for text in val_data['text']
+]
+
+decoded_responses_turkish = []
+max_input_length = 1024 - 20  # Reserve space for generated tokens
+
+# Function to map GPT-2 response to binary labels (0 or 1)
+def map_to_class(response):
+    # Look for keywords in the response and map accordingly
+    if "sol" in response.lower():
+        return 1
+    elif "sağ" in response.lower():
+        return 0
+    return -1  # Return -1 for unclear cases (though you might want to handle this differently)
+
+# Generate responses and post-process for comparison
+for prompt in task1_prompts_turkish:
+    # Tokenize with truncation
+    inputs = tokenizer(
+        prompt, 
+        return_tensors="pt", 
+        padding="longest", 
+        truncation=True, 
+        max_length=max_input_length
+    )
+    inputs = {k: v.to(device) for k, v in inputs.items()}  # Move inputs to GPU
+
+    # Generate outputs
+    outputs = clm_model.generate(
+        inputs["input_ids"],
+        attention_mask=inputs.get("attention_mask"),
+        max_new_tokens=20  # Adjust to fit within model limits
+    )
+
+    # Decode response
+    decoded_response = tokenizer.decode(outputs[0], skip_special_tokens=True)
+    decoded_responses_turkish.append(decoded_response)
+
+    # Print input and output
+    print(f"Input: {prompt}\nOutput: {decoded_response}\n")
+
+# Save the GPT-2 predictions to a JSON file
+with open("task1_clm_predictionsTR.json", "w") as f:
+    json.dump(decoded_responses_turkish, f)
+
+# Post-process the GPT-2 predictions to binary labels
+gpt2_predictions_mapped_turkish = [map_to_class(response) for response in decoded_responses_turkish]
+
+# Assuming you have the true labels in 'val_data', replace with your actual column name
+true_labels_turkish = val_data['label']  # Replace this with your actual labels column name
+
+# Calculate the accuracy of GPT-2 model for Turkish
+accuracy_gpt2_turkish = accuracy_score(true_labels_turkish, gpt2_predictions_mapped_turkish)
+
+# Print the accuracy
+print(f"Accuracy of GPT-2 model on Turkish data: {accuracy_gpt2_turkish}")
